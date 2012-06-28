@@ -26,7 +26,7 @@ public class Main {
             props.load(is);
             version = props.getProperty("version");
         }
-        LOG.info("Starting BrowserMob Proxy version %s", version);
+        LOG.info("Starting BrowserMob Proxy version %s_custom", version);
 
 
         final Injector injector = Guice.createInjector(new ConfigModule(args), new JettyModule(), new SitebricksModule() {
