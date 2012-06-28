@@ -34,6 +34,7 @@ import org.apache.http.protocol.BasicHttpContext;
 import org.apache.http.protocol.ExecutionContext;
 import org.apache.http.protocol.HttpContext;
 import org.apache.http.protocol.HttpRequestExecutor;
+import org.apache.http.entity.BufferedHttpEntity;
 import org.browsermob.core.har.*;
 import org.browsermob.proxy.util.CappedByteArrayOutputStream;
 import org.browsermob.proxy.util.Log;
@@ -52,6 +53,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
+import java.lang.StringBuilder;
 
 public class BrowserMobHttpClient {
     private static final int BUFFER = 4096;
@@ -543,7 +545,17 @@ public class BrowserMobHttpClient {
                 }
 
                 if (response.getEntity() != null) {
-                    is = response.getEntity().getContent();
+                    try {
+                        response.setEntity(new BufferedHttpEntity(response.getEntity()));
+                        BufferedReader reader = new BufferedReader(new InputStreamReader(response.getEntity().getContent(), "UTF-8"));
+                        StringBuilder builder = new StringBuilder();
+                        for (String line = null; (line = reader.readLine()) != null;) {
+                            builder.append(line).append("\n");
+                        }
+                        responseBody = builder.toString();
+                    } catch (Exception e) {
+                        LOG.warn("Could not read page body", e);
+                    }
                 }
 
                 // check for null (resp 204 can cause HttpClient to return null, which is what Google does with http://clients1.google.com/generate_204)
@@ -597,8 +609,8 @@ public class BrowserMobHttpClient {
         // todo: where you store this in HAR?
         // obj.setErrorMessage(errorMessage);
         entry.getResponse().setBodySize(bytes);
-        entry.getResponse().getContent().setSize(bytes);
         entry.getResponse().setStatus(statusCode);
+        entry.getResponse().getContent().setText(responseBody);
         if (statusLine != null) {
             entry.getResponse().setStatusText(statusLine.getReasonPhrase());
         }
@@ -661,6 +673,7 @@ public class BrowserMobHttpClient {
 
         String contentType = null;
 
+        
         if (response != null) {
             try {
                 Header contentTypeHdr = response.getFirstHeader("Content-Type");
@@ -761,7 +774,6 @@ public class BrowserMobHttpClient {
                 LOG.warn("Could not parse URL", e);
             }
         }
-        
 
         return new BrowserMobHttpResponse(entry, method, response, contentMatched, verificationText, errorMessage, responseBody, contentType, charSet);
     }
