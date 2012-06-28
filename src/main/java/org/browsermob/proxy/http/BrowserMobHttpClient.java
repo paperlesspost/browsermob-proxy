@@ -546,29 +546,29 @@ public class BrowserMobHttpClient {
 
                 if (response.getEntity() != null) {
                     try {
+                        Header contentEncodingHeader = response.getFirstHeader("Content-Encoding");
                         response.setEntity(new BufferedHttpEntity(response.getEntity()));
-                        BufferedReader reader = new BufferedReader(new InputStreamReader(response.getEntity().getContent(), "UTF-8"));
+                        is = response.getEntity().getContent();
+                        
+                        // deal with GZIP content!
+                        if (decompress) {
+                            if (contentEncodingHeader != null && "gzip".equalsIgnoreCase(contentEncodingHeader.getValue())) {
+                                is = new GZIPInputStream(is);
+                                LOG.warn("GZip is not fully supported!");
+                            }
+                        }
+                        
+                        BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
                         StringBuilder builder = new StringBuilder();
                         for (String line = null; (line = reader.readLine()) != null;) {
                             builder.append(line).append("\n");
                         }
+                        
                         responseBody = builder.toString();
+                        bytes = copyWithStats(is, os);
                     } catch (Exception e) {
                         LOG.warn("Could not read page body", e);
                     }
-                }
-
-                // check for null (resp 204 can cause HttpClient to return null, which is what Google does with http://clients1.google.com/generate_204)
-                if (is != null) {
-                    // deal with GZIP content!
-                    if (decompress) {
-                        Header contentEncodingHeader = response.getFirstHeader("Content-Encoding");
-                        if (contentEncodingHeader != null && "gzip".equalsIgnoreCase(contentEncodingHeader.getValue())) {
-                            is = new GZIPInputStream(is);
-                        }
-                    }
-
-                    bytes = copyWithStats(is, os);
                 }
             }
         } catch (Exception e) {
@@ -610,6 +610,7 @@ public class BrowserMobHttpClient {
         // obj.setErrorMessage(errorMessage);
         entry.getResponse().setBodySize(bytes);
         entry.getResponse().setStatus(statusCode);
+        entry.getResponse().getContent().setSize(bytes);
         entry.getResponse().getContent().setText(responseBody);
         if (statusLine != null) {
             entry.getResponse().setStatusText(statusLine.getReasonPhrase());
