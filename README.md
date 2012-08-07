@@ -171,3 +171,10 @@ NodeJS Support
 --------------
 
 NodeJS bindings for browswermob-proxy are available [here](https://github.com/zzo/browsermob-node).  Built-in support for [Selenium][http://seleniumhq.com] or use [CapserJS-on-PhantomJS](http://casperjs.org) or anything else to drive traffic for HAR generation.
+
+DataSift Tweaks
+---------------
+
+Here's a list of the tweaks that DataSift has made to browsermob-proxy.  Each tweak has been merged into the develop/ branch, and we've left the individual feature's implementation in its own branch too so that we can submit them upstream.
+
+* merged/executable-jar : POM file now builds browsermob-proxy-XXX-standalone.jar, which you can use to run browsermob-proxy from the command-line on any platform.
