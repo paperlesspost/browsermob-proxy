@@ -474,7 +474,7 @@ public class BrowserMobHttpClient {
         if (this.har != null && harPageRef != null) {
             har.getLog().addEntry(entry);
         }
-        
+
     	String query = method.getURI().getQuery();
     	if (query != null) {
 	        MultiMap<String> params = new MultiMap<String>();
@@ -550,7 +550,7 @@ public class BrowserMobHttpClient {
                         Header contentEncodingHeader = response.getFirstHeader("Content-Encoding");
                         response.setEntity(new BufferedHttpEntity(response.getEntity()));
                         is = response.getEntity().getContent();
-                        
+
                         // deal with GZIP content!
                         if (decompress) {
                             if (contentEncodingHeader != null && "gzip".equalsIgnoreCase(contentEncodingHeader.getValue())) {
@@ -558,7 +558,7 @@ public class BrowserMobHttpClient {
                                 LOG.warn("GZip is not fully supported!");
                             }
                         }
-                        
+
                         // Get CT
                         if (response != null) {
                             try {
@@ -570,10 +570,10 @@ public class BrowserMobHttpClient {
                                 throw new RuntimeException(e);
                             }
                         }
-                        
+
                         StringBuilder builder = new StringBuilder();
                         LOG.info(contentType);
-                        if (contentType.startsWith("text/html")) {// || contentType.startsWith("text/plain") || contentType.startsWith("text/javascript") || contentType.startsWith("text/css")) {
+                        if (contentType.startsWith("application/json")) {
                             bytes = copyWithStats(is, os, builder);
                         } else {
                             bytes = copyWithStats(is, os, null);
@@ -670,16 +670,16 @@ public class BrowserMobHttpClient {
             }
         }
 
-        //capture request cookies       
-        List<Cookie> cookies = (List<Cookie>) ctx.getAttribute("browsermob.http.request.cookies");        
+        //capture request cookies
+        List<Cookie> cookies = (List<Cookie>) ctx.getAttribute("browsermob.http.request.cookies");
         if (cookies != null) {
 	        for (Cookie c : cookies) {
 		        HarCookie hc = toHarCookie(c);
-		        entry.getRequest().getCookies().add(hc);        	
+		        entry.getRequest().getCookies().add(hc);
 	        }
         }
 
-        
+
         if (response != null) {
             try {
                 Header contentTypeHdr = response.getFirstHeader("Content-Type");
@@ -701,13 +701,13 @@ public class BrowserMobHttpClient {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-            
+
             //capture response cookies
-            cookies = (List<Cookie>) ctx.getAttribute("browsermob.http.response.cookies");            
+            cookies = (List<Cookie>) ctx.getAttribute("browsermob.http.response.cookies");
             if (cookies != null) {
     	        for (Cookie c : cookies) {
     		        HarCookie hc = toHarCookie(c);
-    		        entry.getResponse().getCookies().add(hc);        	
+    		        entry.getResponse().getCookies().add(hc);
     	        }
             }
         }
@@ -951,7 +951,7 @@ public class BrowserMobHttpClient {
             }
         }
     }
-        
+
     private HarCookie toHarCookie(Cookie c) {
         HarCookie hc = new HarCookie();
         hc.setName(c.getName());
@@ -959,7 +959,7 @@ public class BrowserMobHttpClient {
         hc.setValue(c.getValue());
         hc.setDomain(c.getDomain());
         hc.setExpires(c.getExpiryDate());
-        return hc;    	
+        return hc;
     }
 
     class ActiveRequest {
@@ -1047,7 +1047,7 @@ public class BrowserMobHttpClient {
         long bytesCopied = 0;
         byte[] buffer = new byte[BUFFER];
         int length;
-        
+
         try {
             // Send to browser
             int firstByte = is.read();
@@ -1067,7 +1067,7 @@ public class BrowserMobHttpClient {
                     os.flush();
                 }
             } while (length != -1);
-            
+
             if (builder != null) {
                 // Send to HAR
                 is.reset();
