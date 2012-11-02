@@ -34,6 +34,7 @@ import org.apache.http.protocol.BasicHttpContext;
 import org.apache.http.protocol.ExecutionContext;
 import org.apache.http.protocol.HttpContext;
 import org.apache.http.protocol.HttpRequestExecutor;
+import org.apache.http.entity.BufferedHttpEntity;
 import org.browsermob.core.har.*;
 import org.browsermob.proxy.util.CappedByteArrayOutputStream;
 import org.browsermob.proxy.util.Log;
@@ -52,6 +53,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
+import java.lang.StringBuilder;
 
 public class BrowserMobHttpClient {
     private static final int BUFFER = 4096;
@@ -484,6 +486,7 @@ public class BrowserMobHttpClient {
 	        }
         }
 
+        String contentType = null;
         String errorMessage = null;
         HttpResponse response = null;
 
@@ -543,20 +546,44 @@ public class BrowserMobHttpClient {
                 }
 
                 if (response.getEntity() != null) {
-                    is = response.getEntity().getContent();
-                }
-
-                // check for null (resp 204 can cause HttpClient to return null, which is what Google does with http://clients1.google.com/generate_204)
-                if (is != null) {
-                    // deal with GZIP content!
-                    if (decompress) {
+                    try {
                         Header contentEncodingHeader = response.getFirstHeader("Content-Encoding");
-                        if (contentEncodingHeader != null && "gzip".equalsIgnoreCase(contentEncodingHeader.getValue())) {
-                            is = new GZIPInputStream(is);
+                        response.setEntity(new BufferedHttpEntity(response.getEntity()));
+                        is = response.getEntity().getContent();
+                        
+                        // deal with GZIP content!
+                        if (decompress) {
+                            if (contentEncodingHeader != null && "gzip".equalsIgnoreCase(contentEncodingHeader.getValue())) {
+                                is = new GZIPInputStream(is);
+                                LOG.warn("GZip is not fully supported!");
+                            }
                         }
+                        
+                        // Get CT
+                        if (response != null) {
+                            try {
+                                Header contentTypeHdr = response.getFirstHeader("Content-Type");
+                                if (contentTypeHdr != null) {
+                                    contentType = contentTypeHdr.getValue();
+                                }
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        }
+                        
+                        StringBuilder builder = new StringBuilder();
+                        LOG.info(contentType);
+                        if (contentType.startsWith("text/html")) {// || contentType.startsWith("text/plain") || contentType.startsWith("text/javascript") || contentType.startsWith("text/css")) {
+                            bytes = copyWithStats(is, os, builder);
+                        } else {
+                            bytes = copyWithStats(is, os, null);
+                        }
+                        responseBody = builder.toString();
+                    } catch (Exception e) {
+                        LOG.warn("Could not read page body", e);
+                    } finally {
+                        try { is.close(); } catch (Exception e) {}
                     }
-
-                    bytes = copyWithStats(is, os);
                 }
             }
         } catch (Exception e) {
@@ -575,14 +602,6 @@ public class BrowserMobHttpClient {
             synchronized (activeRequests) {
                 activeRequests.remove(activeRequest);
             }
-
-            if (is != null) {
-                try {
-                    is.close();
-                } catch (IOException e) {
-                    // this is OK to ignore
-                }
-            }
         }
 
         // record the response as ended
@@ -597,8 +616,9 @@ public class BrowserMobHttpClient {
         // todo: where you store this in HAR?
         // obj.setErrorMessage(errorMessage);
         entry.getResponse().setBodySize(bytes);
-        entry.getResponse().getContent().setSize(bytes);
         entry.getResponse().setStatus(statusCode);
+        entry.getResponse().getContent().setSize(bytes);
+        entry.getResponse().getContent().setText(responseBody);
         if (statusLine != null) {
             entry.getResponse().setStatusText(statusLine.getReasonPhrase());
         }
@@ -659,8 +679,7 @@ public class BrowserMobHttpClient {
 	        }
         }
 
-        String contentType = null;
-
+        
         if (response != null) {
             try {
                 Header contentTypeHdr = response.getFirstHeader("Content-Type");
@@ -675,12 +694,11 @@ public class BrowserMobHttpClient {
 
                 if (os instanceof ByteArrayOutputStream) {
                     responseBody = ((ByteArrayOutputStream) os).toString(charSet);
-
                     if (verificationText != null) {
                         contentMatched = responseBody.contains(verificationText);
                     }
                 }
-            } catch (UnsupportedEncodingException e) {
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
             
@@ -761,7 +779,6 @@ public class BrowserMobHttpClient {
                 LOG.warn("Could not parse URL", e);
             }
         }
-        
 
         return new BrowserMobHttpResponse(entry, method, response, contentMatched, verificationText, errorMessage, responseBody, contentType, charSet);
     }
@@ -1026,13 +1043,13 @@ public class BrowserMobHttpClient {
         this.hostNameResolver.setCacheTimeout(timeout);
     }
 
-    public static long copyWithStats(InputStream is, OutputStream os) throws IOException {
+    public static long copyWithStats(InputStream is, OutputStream os, StringBuilder builder) throws IOException {
         long bytesCopied = 0;
         byte[] buffer = new byte[BUFFER];
         int length;
-
+        
         try {
-            // read the first byte
+            // Send to browser
             int firstByte = is.read();
 
             if (firstByte == -1) {
@@ -1050,6 +1067,15 @@ public class BrowserMobHttpClient {
                     os.flush();
                 }
             } while (length != -1);
+            
+            if (builder != null) {
+                // Send to HAR
+                is.reset();
+                BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+                for (String line = null; (line = reader.readLine()) != null;) {
+                    builder.append(line);
+                }
+            }
         } finally {
             try {
                 is.close();
