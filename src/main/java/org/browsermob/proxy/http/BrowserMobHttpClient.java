@@ -449,6 +449,7 @@ public class BrowserMobHttpClient {
 
         String charSet = "UTF-8";
         String responseBody = null;
+        String decodedResponseBody = null;
 
         InputStream is = null;
         int statusCode = -998;
@@ -486,7 +487,6 @@ public class BrowserMobHttpClient {
 	        }
         }
 
-        String contentType = null;
         String errorMessage = null;
         HttpResponse response = null;
 
@@ -546,43 +546,74 @@ public class BrowserMobHttpClient {
                 }
 
                 if (response.getEntity() != null) {
-                    try {
+                    BufferedHttpEntity bufferedHttpEntity = new BufferedHttpEntity(response.getEntity());
+                    is = bufferedHttpEntity.getContent();
+                }
+
+                // check for null (resp 204 can cause HttpClient to return null, which is what Google does with http://clients1.google.com/generate_204)
+                if (is != null) {
+                    // deal with GZIP content!
+                    if (decompress) {
                         Header contentEncodingHeader = response.getFirstHeader("Content-Encoding");
-                        response.setEntity(new BufferedHttpEntity(response.getEntity()));
-                        is = response.getEntity().getContent();
-
-                        // deal with GZIP content!
-                        if (decompress) {
-                            if (contentEncodingHeader != null && "gzip".equalsIgnoreCase(contentEncodingHeader.getValue())) {
-                                is = new GZIPInputStream(is);
-                                LOG.warn("GZip is not fully supported!");
-                            }
+                        if (contentEncodingHeader != null && "gzip".equalsIgnoreCase(contentEncodingHeader.getValue())) {
+                            is = new GZIPInputStream(is);
                         }
+                    }
 
-                        // Get CT
-                        if (response != null) {
-                            try {
-                                Header contentTypeHdr = response.getFirstHeader("Content-Type");
-                                if (contentTypeHdr != null) {
-                                    contentType = contentTypeHdr.getValue();
+                    bytes = copyWithStats(is, os);
+
+                    if (captureContent) {
+                        try {
+                            String contentType = null;
+                            String contentEncoding = null;
+
+                            // Capture the "Content-Type" header so we can
+                            // determine whether or not we want to add the
+                            // response body to the HAR file.
+                            Header contentTypeHeader = response.getFirstHeader("Content-Type");
+                            if (contentTypeHeader != null) {
+                                contentType = contentTypeHeader.getValue();
+                                LOG.info("[HAR response capture] Content-Type: " + contentType);
+                            }
+
+                            // Capture the "Content-Encoding" header so we can
+                            // determine whether or not the response requires
+                            // additional processing.
+                            Header contentEncodingHeader = response.getFirstHeader("Content-Encoding");
+                            if (contentEncodingHeader != null) {
+                                contentEncoding = contentEncodingHeader.getValue();
+                                LOG.info("[HAR response capture] Content-Encoding: " + contentEncoding);
+                            }
+
+                            if (contentType != null) {
+                                // Use the "Content-Type" header to determine
+                                // whether or not we want to add the response body
+                                // to the HAR file.
+                                if (contentType.startsWith("text/") || contentType.startsWith("application/json") || contentType.startsWith("application/x-javascript")) {
+                                    LOG.info("[HAR response capture] Capturing");
+
+                                    // Reset the InputStream. Done now because
+                                    // GZIPInputStream does not support this
+                                    // method.
+                                    is.reset();
+
+                                    // If the content is Gzip encoded, decode it.
+                                    if (contentEncoding != null && "gzip".equalsIgnoreCase(contentEncoding)) {
+                                        LOG.info("[HAR response capture] Body is Gzip encoded");
+                                        is = new GZIPInputStream(is);
+                                    }
+
+                                    // Finally, build the response body string
+                                    // for the HAR file.
+                                    StringBuilder builder = new StringBuilder();
+                                    BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+                                    for (String line = null; (line = reader.readLine()) != null;) {
+                                        builder.append(line);
+                                    }
+                                    decodedResponseBody = builder.toString();
                                 }
-                            } catch (Exception e) {
-                                throw new RuntimeException(e);
                             }
-                        }
-
-                        StringBuilder builder = new StringBuilder();
-                        LOG.info(contentType);
-                        if (contentType.startsWith("application/json")) {
-                            bytes = copyWithStats(is, os, builder);
-                        } else {
-                            bytes = copyWithStats(is, os, null);
-                        }
-                        responseBody = builder.toString();
-                    } catch (Exception e) {
-                        LOG.warn("Could not read page body", e);
-                    } finally {
-                        try { is.close(); } catch (Exception e) {}
+                        } catch (Exception e) { LOG.warn("[HAR response capture] Failed to capture", e); }
                     }
                 }
             }
@@ -602,6 +633,14 @@ public class BrowserMobHttpClient {
             synchronized (activeRequests) {
                 activeRequests.remove(activeRequest);
             }
+
+            if (is != null) {
+                try {
+                    is.close();
+                } catch (IOException e) {
+                    // this is OK to ignore
+                }
+            }
         }
 
         // record the response as ended
@@ -616,9 +655,9 @@ public class BrowserMobHttpClient {
         // todo: where you store this in HAR?
         // obj.setErrorMessage(errorMessage);
         entry.getResponse().setBodySize(bytes);
-        entry.getResponse().setStatus(statusCode);
         entry.getResponse().getContent().setSize(bytes);
-        entry.getResponse().getContent().setText(responseBody);
+        entry.getResponse().setStatus(statusCode);
+        entry.getResponse().getContent().setText(decodedResponseBody);
         if (statusLine != null) {
             entry.getResponse().setStatusText(statusLine.getReasonPhrase());
         }
@@ -679,6 +718,7 @@ public class BrowserMobHttpClient {
 	        }
         }
 
+    String contentType = null;
 
         if (response != null) {
             try {
@@ -1043,13 +1083,13 @@ public class BrowserMobHttpClient {
         this.hostNameResolver.setCacheTimeout(timeout);
     }
 
-    public static long copyWithStats(InputStream is, OutputStream os, StringBuilder builder) throws IOException {
+    public static long copyWithStats(InputStream is, OutputStream os) throws IOException {
         long bytesCopied = 0;
         byte[] buffer = new byte[BUFFER];
         int length;
 
         try {
-            // Send to browser
+            // read the first byte
             int firstByte = is.read();
 
             if (firstByte == -1) {
@@ -1067,15 +1107,6 @@ public class BrowserMobHttpClient {
                     os.flush();
                 }
             } while (length != -1);
-
-            if (builder != null) {
-                // Send to HAR
-                is.reset();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
-                for (String line = null; (line = reader.readLine()) != null;) {
-                    builder.append(line);
-                }
-            }
         } finally {
             try {
                 is.close();
