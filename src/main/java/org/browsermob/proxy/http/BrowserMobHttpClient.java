@@ -1,8 +1,5 @@
 package org.browsermob.proxy.http;
 
-import cz.mallat.uasparser.CachingOnlineUpdateUASparser;
-import cz.mallat.uasparser.UASparser;
-import cz.mallat.uasparser.UserAgentInfo;
 import org.apache.http.*;
 import org.apache.http.auth.*;
 import org.apache.http.client.CredentialsProvider;
@@ -372,28 +369,6 @@ public class BrowserMobHttpClient {
         HttpRequestBase method = req.getMethod();
         String verificationText = req.getVerificationText();
         String url = method.getURI().toString();
-
-        // save the browser and version if it's not yet been set
-        if (har != null && har.getLog().getBrowser() == null) {
-            Header[] uaHeaders = method.getHeaders("User-Agent");
-            if (uaHeaders != null && uaHeaders.length > 0) {
-                String userAgent = uaHeaders[0].getValue();
-                try {
-                    // note: this doesn't work for 'Fandango/4.5.1 CFNetwork/548.1.4 Darwin/11.0.0'
-                    UASparser p = new CachingOnlineUpdateUASparser();
-                    UserAgentInfo uai = p.parse(userAgent);
-                    String name = uai.getUaName();
-                    int lastSpace = name.lastIndexOf(' ');
-                    String browser = name.substring(0, lastSpace);
-                    String version = name.substring(lastSpace + 1);
-                    har.getLog().setBrowser(new HarNameVersion(browser, version));
-                } catch (IOException e) {
-                    // ignore it, it's fine
-                } catch (Exception e) {
-                	LOG.warn("Failed to parse user agent string", e);
-                }
-            }
-        }
 
         // process any rewrite requests
         boolean rewrote = false;
