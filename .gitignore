@@ -6,3 +6,6 @@ target
 /.settings
 /.project
 pom.xml
+/.idea
+atlassian-ide-plugin.xml
+.DS_Store
